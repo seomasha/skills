@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "core",
-      "description": "Project-agnostic tools: /ai-workflow-analyzer, /model-advisor, /prompt-engineer.",
+      "description": "Project-agnostic tools: /ai-workflow-analyzer, /ai-slop, /model-advisor, /prompt-engineer.",
       "source": "./plugins/core",
       "category": "productivity"
     },

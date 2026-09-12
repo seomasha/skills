@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "smasetic",
+  "description": "Sead Masetic's own Claude Code skills.",
+  "owner": { "name": "Sead Masetic", "url": "https://github.com/seomasha" },
+  "plugins": [
+    {
+      "name": "core",
+      "description": "Project-agnostic tools: /ai-workflow-analyzer, /model-advisor, /prompt-engineer.",
+      "source": "./plugins/core",
+      "category": "productivity"
+    },
+    {
+      "name": "linear",
+      "description": "/ship-ticket — Linear ticket to merged PR. Enable per project that uses Linear.",
+      "source": "./plugins/linear",
+      "category": "productivity"
+    }
+  ]
+}

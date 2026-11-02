@@ -19,6 +19,44 @@ Update: `/plugin update` (or `/plugin marketplace update smasetic`).
 | `core`   | `/ai-workflow-analyzer` audit MCPs/skills/hooks/plugins for redundancy, duplicates, scope, unused · `/ai-slop` score a website for vibe-coded tells (missing 404/privacy/robots/OG, placeholder copy, purple gradients) and generate the missing files · `/council <idea>` Believer, Skeptic, Investor argue in parallel, a Judge rules pursue / change / drop · `/design-system <company>` open the site in Chrome, extract computed colors/fonts/spacing/motion tokens + research UX principles, write design-system.md · `/model-advisor` cheapest model per plan task · `/prompt-engineer` · `/qa` click through a running app in Chrome like a first-time user, write QA-REPORT.md with severity-ranked bugs | user                   |
 | `linear` | `/ship-ticket` Linear ticket → branch → plan → parallel subagents → CI → PR → Linear update                                                                                                                                                                                                                                 | project (needs Linear) |
 
+## CI: automated PR review
+
+`.github/workflows/pr-review.yml` is a reusable workflow that runs `/core:pr-review` in GitHub Actions via [claude-code-action](https://github.com/anthropics/claude-code-action) on your Claude Max/Pro token and posts one review as `github-actions[bot]`. It never blocks a merge.
+
+Per repo, once:
+
+```
+claude setup-token                      # copy the token
+gh secret set CLAUDE_CODE_OAUTH_TOKEN
+gh label create re-review
+```
+
+Then add `.github/workflows/pr-review.yml` (edit `branches`):
+
+```yaml
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, labeled]
+    branches: [main]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    uses: seomasha/skills/.github/workflows/pr-review.yml@main
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+Triggers: PR opened / ready for review (drafts skipped), adding the `re-review` label (removed afterwards), or a `/pr-review` comment (only once the caller workflow is on the default branch). Pushes don't trigger, since a full Opus run per push is costly. Each run uses the same usage limit as interactive sessions.
+
 ## Third-party
 
 Not vendored here — each has its own updater.

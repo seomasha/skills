@@ -1,0 +1,97 @@
+# Reusable PR review: runs /core:pr-review via claude-code-action and posts one review as github-actions[bot].
+# Callers declare the triggers; see README "CI: automated PR review".
+name: PR Review
+
+on:
+  workflow_call:
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    name: review
+    # Automatic runs skip drafts; the `re-review` label (or a `/pr-review` comment) is an explicit
+    # request, so it runs on drafts too and the label is always removed afterwards.
+    if: |
+      (github.event_name == 'pull_request' &&
+       ((github.event.action == 'labeled' && github.event.label.name == 're-review') ||
+        (github.event.action != 'labeled' && !github.event.pull_request.draft))) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+       startsWith(github.event.comment.body, '/pr-review'))
+    # Job-level so unrelated PR comments (skipped runs) don't cancel a review in progress.
+    concurrency:
+      group: pr-review-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Review
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Run specialist subagents in the foreground: backgrounded ones were dropped when the
+          # session ended its turn, so no review was posted.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          plugin_marketplaces: https://github.com/seomasha/skills.git
+          plugins: core@smasetic
+          # CI-only overrides; the skill itself stays interactive for on-demand use.
+          prompt: |
+            /core:pr-review ${{ github.event.pull_request.number || github.event.issue.number }}
+
+            Non-interactive CI run. These rules override the skill where they conflict:
+            - Never stop at the "Post to GitHub?" prompt. Treat the answer as "all" and post in the same run. Ending the run without posting the review is a failure.
+            - Always post exactly one review with the `<!-- pr-review:v1 -->` marker on the current head commit, even when there are no findings (body-only "Ready to merge") and on re-review with nothing new (body with Fixed / Still open).
+            - Exception: if the skill's guard says a marker review already exists on the head commit, stop without posting.
+            - Known values, no lookups needed: N=${{ github.event.pull_request.number || github.event.issue.number }}, REPO=${{ github.repository }}, ME=github-actions[bot] (gh pr view shows it as github-actions). Do not call `gh api user`.
+            - Only `gh ...` and `git ...` shell commands are permitted, each run on its own: substitute the values above literally; no variable assignments, `$(...)`, pipes, `&&`/`;`, `cd`, or redirects. Use `--jq`/`-q` instead of piping to jq.
+            - Write review.json with the Write tool at ${{ github.workspace }}/review.json, then run `gh api repos/${{ github.repository }}/pulls/<N>/reviews -X POST --input review.json`. If the POST fails (e.g. a comment line not in the diff), move that finding into the review body and post again.
+          claude_args: >-
+            --model opus
+            --allowedTools "Bash(gh:*),Bash(git:*),Read,Write,Grep,Glob,Task"
+
+      # The action reports success even when Claude ends without posting, so check the PR itself.
+      # A marker review on the head commit covers both a fresh post and the skill's "already reviewed" guard.
+      - name: Verify review was posted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          N: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          head=$(gh pr view "$N" --json headRefOid -q .headRefOid)
+          count=$(gh api --paginate "repos/${{ github.repository }}/pulls/$N/reviews" \
+            --jq "[.[] | select(.user.login == \"github-actions[bot]\" and .commit_id == \"$head\" and (.body | contains(\"<!-- pr-review:v1 -->\")))] | length" \
+            | awk '{s+=$1} END {print s+0}')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No pr-review review found on head commit $head"
+            exit 1
+          fi
+
+      # Lets us see which tool calls were denied; the action hides the transcript in the log.
+      - name: Upload Claude transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-execution-output
+          path: ${{ runner.temp }}/claude-execution-output.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # Drop the label so it can be added again for the next re-review.
+      # Tolerates a missing label: re-running a "labeled" run replays the event after attempt 1 already removed it.
+      - name: Remove re-review label
+        if: always() && github.event.action == 'labeled'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X DELETE "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels/re-review" || echo "re-review label already removed"

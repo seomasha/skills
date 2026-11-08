@@ -35,6 +35,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Bun from npm instead of the action's setup-bun: its GitHub-releases download returned
+      # 504 for hours on 2026-11-08 and failed every review. Keep in step with the action's pin.
+      - name: Install Bun
+        id: bun
+        run: |
+          npm install -g bun@1.4.4
+          echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
+
       - name: Review
         uses: anthropics/claude-code-action@v1
         env:
@@ -43,6 +51,7 @@ jobs:
           # session ended its turn, so no review was posted.
           CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
         with:
+          path_to_bun_executable: ${{ steps.bun.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
           plugin_marketplaces: https://github.com/seomasha/skills.git
